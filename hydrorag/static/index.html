@@ -111,6 +111,17 @@
     .bubble { max-width: min(680px, 86%); padding: 13px 15px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 3px 12px rgba(20,50,74,.04); }
     .user .bubble { border-color: #d6e3f9; background: #f4f8ff; }
     .bubble-text { white-space: pre-wrap; line-height: 1.72; font-size: 14px; }
+    .caret {
+      display: inline-block; width: 7px; height: 15px; margin-left: 2px;
+      vertical-align: -2px; background: var(--blue); border-radius: 1px;
+      animation: caret-blink 1s steps(2, start) infinite;
+    }
+    @keyframes caret-blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+    .guard-note {
+      margin-top: 10px; padding: 7px 9px; border: 1px solid #f3d5a1; border-radius: 6px;
+      background: #fdf6e9; color: #8a5a10; font-size: 12px; line-height: 1.5;
+    }
     .citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
     .citation { padding: 5px 7px; border: 1px solid #d8e2ec; border-radius: 5px; color: #546575; background: #f8fafc; font-size: 11px; }
     .composer-wrap { flex: 0 0 auto; padding: 14px max(24px, calc((100vw - 920px) / 2)) 22px; border-top: 1px solid var(--line); background: #fff; }
@@ -241,6 +252,150 @@
       return item;
     }
 
+    function renderCitations(bubble, citations) {
+      if (!citations || !citations.length) return;
+      bubble.querySelector(".citations")?.remove();
+      const source = document.createElement("div");
+      source.className = "citations";
+      citations.forEach((citation) => {
+        const tag = document.createElement("span");
+        tag.className = "citation";
+        const location = citation.location || (citation.page ? `p.${citation.page}` : "位置未知");
+        tag.textContent = `${citation.evidence_id || "证据"} · ${citation.title || "未命名资料"} · ${location}`;
+        source.appendChild(tag);
+      });
+      bubble.appendChild(source);
+    }
+
+    function createStreamingMessage() {
+      welcome.style.display = "none";
+      const item = document.createElement("div");
+      item.className = "message assistant";
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = "H";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      const body = document.createElement("div");
+      body.className = "bubble-text";
+      body.textContent = "";
+      const caret = document.createElement("span");
+      caret.className = "caret";
+      body.appendChild(caret);
+      bubble.appendChild(body);
+      item.append(avatar, bubble);
+      messages.appendChild(item);
+      $("#chat").scrollTop = $("#chat").scrollHeight;
+      return { bubble, body, caret, item };
+    }
+
+    function keepScrolled() {
+      const chat = $("#chat");
+      const atBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 90;
+      if (atBottom) chat.scrollTop = chat.scrollHeight;
+    }
+
+    /**
+     * Ask the backend and render the answer as it streams.
+     *
+     * The server verifies the whole answer before releasing any token, so a
+     * blocked answer arrives as its refusal notice rather than unverified text;
+     * `grounded === false` is surfaced to the user.
+     */
+    async function ask(text) {
+      const value = (text || query.value).trim();
+      if (!value || sendButton.disabled) return;
+      query.value = "";
+      query.style.height = "auto";
+      addMessage("user", value);
+      sendButton.disabled = true;
+      sendButton.textContent = "检索中";
+
+      const { bubble, body, caret } = createStreamingMessage();
+      body.textContent = "正在检索资料证据并组织回答…";
+      let received = false;
+
+      try {
+        const response = await fetch("/api/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: value,
+            document_ids: selectedDocumentIds(),
+            thread_id: threadId,
+            user_id: userId,
+          }),
+        });
+        if (!response.ok || !response.body) {
+          const detail = await response.json().catch(() => ({}));
+          throw new Error(detail.detail || "服务请求失败");
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let citations = [];
+        let grounded = null;
+
+        for (;;) {
+          const { done, value: chunk } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(chunk, { stream: true });
+
+          // SSE frames are separated by a blank line.
+          const blocks = buffer.split("\n\n");
+          buffer = blocks.pop() ?? "";
+          for (const block of blocks) {
+            const line = block.split("\n").find((row) => row.startsWith("data: "));
+            if (!line) continue;
+            let event;
+            try {
+              event = JSON.parse(line.slice(6));
+            } catch {
+              continue;
+            }
+            if (event.type === "start") {
+              // Verification has begun; keep the placeholder until real tokens arrive.
+              continue;
+            } else if (event.type === "citations") {
+              citations = event.citations || [];
+              renderCitations(bubble, citations);
+            } else if (event.type === "delta") {
+              if (!received) {
+                received = true;
+                body.textContent = "";
+                body.appendChild(caret);
+              }
+              caret.insertAdjacentText("beforebegin", event.text || "");
+              keepScrolled();
+            } else if (event.type === "end") {
+              grounded = event.grounded;
+              if (event.citations) {
+                citations = event.citations;
+                renderCitations(bubble, citations);
+              }
+            }
+          }
+        }
+
+        caret.remove();
+        if (!received) body.textContent = "没有返回内容。";
+        if (grounded === false) {
+          const badge = document.createElement("div");
+          badge.className = "guard-note";
+          badge.textContent = "⚠ 该回答未通过幻觉校验，系统已阻止未经核实的输出。";
+          bubble.appendChild(badge);
+        }
+      } catch (error) {
+        caret.remove();
+        body.textContent = `请求失败：${error.message || "请检查服务是否启动"}`;
+      } finally {
+        sendButton.disabled = false;
+        sendButton.textContent = "发送";
+        query.focus();
+      }
+    }
+
     function selectedDocumentIds() {
       return [...document.querySelectorAll("#document-list input:checked")].map((input) => input.value);
     }
@@ -305,36 +460,6 @@
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
       throw new Error("索引任务超时，请稍后查看任务状态");
-    }
-
-    async function ask(text) {
-      const value = (text || query.value).trim();
-      if (!value || sendButton.disabled) return;
-      query.value = "";
-      query.style.height = "auto";
-      addMessage("user", value);
-      sendButton.disabled = true;
-      sendButton.textContent = "检索中";
-      const loading = addMessage("assistant", "正在检索资料证据并组织回答…");
-      try {
-        const response = await fetch("/api/chat/invoke", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: { query: value, document_ids: selectedDocumentIds(), thread_id: threadId, user_id: userId } })
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "服务请求失败");
-        const result = data.output || data;
-        loading.remove();
-        addMessage("assistant", result.output || "没有返回内容。", result.citations || []);
-      } catch (error) {
-        loading.remove();
-        addMessage("assistant", `请求失败：${error.message || "请检查服务是否启动"}`);
-      } finally {
-        sendButton.disabled = false;
-        sendButton.textContent = "发送";
-        query.focus();
-      }
     }
 
     $("#composer").addEventListener("submit", (event) => { event.preventDefault(); ask(); });
