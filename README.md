@@ -378,6 +378,35 @@ python -m hydrorag list
 
 ### 4.3 启动 LangServe 和 Web 前端
 
+#### 方式一：一键启动脚本（推荐）
+
+在项目根目录双击 `start.bat`，或在 PowerShell 中执行：
+
+```powershell
+cd D:\Codes\HydroRAG
+.\start.ps1
+```
+
+脚本会自动完成：检查虚拟环境与 `.env` → 释放被占用的端口（若已有 HydroRAG 实例则直接复用）→ 在独立窗口启动服务并把输出写入 `data\logs\server.log` → 等待健康检查通过 → 打开浏览器。
+
+常用参数：
+
+| 命令 | 作用 |
+| --- | --- |
+| `.\start.ps1` | 启动服务并打开浏览器 |
+| `.\start.ps1 -Port 8080` | 使用其他端口 |
+| `.\start.ps1 -Reload` | 开发模式，改动代码自动重载 |
+| `.\start.ps1 -NoBrowser` | 只启动服务，不打开浏览器 |
+| `.\start.ps1 -Stop` | 停止已运行的服务 |
+
+如果 PowerShell 提示"禁止运行脚本"，用批处理入口即可绕过，无需修改系统执行策略：
+
+```powershell
+.\start.bat -Stop
+```
+
+#### 方式二：手动启动
+
 推荐使用虚拟环境中的解释器：
 
 ```powershell
@@ -406,7 +435,7 @@ http://127.0.0.1:8000/
 | `DELETE /api/conversations/{thread_id}` | 清除指定短期会话 |
 | `POST /api/chat/invoke` | LangServe 单次调用 |
 | `POST /api/chat/batch` | LangServe 批量调用 |
-| `POST /api/chat/stream` | LangServe SSE 流式接口 |
+| `POST /api/chat/stream` | SSE 流式接口（答案通过三道校验后再逐块回放） |
 | `GET /docs` | FastAPI 接口文档 |
 
 完整地址示例：
