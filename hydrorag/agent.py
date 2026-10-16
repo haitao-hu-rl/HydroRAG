@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, TypedDict
+from typing import Any, Iterable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -89,12 +89,65 @@ class HydroRAGAgent:
         if memory_result is not None:
             self.memory.append_turn(user_id, thread_id, query, memory_result["output"])
             return memory_result
+        state = self._build_state(query, document_ids, top_k, thread_id, user_id)
+        result = self.graph.invoke(state)
+        self._persist_turn(user_id, thread_id, query, result)
+        return result
+
+    def run_stream(
+        self,
+        query: str,
+        document_ids: list[str] | None = None,
+        top_k: int | None = None,
+        thread_id: str = "default",
+        user_id: str = "local",
+    ):
+        """Yield Server-Sent-Event frames for one query.
+
+        Verification still runs to completion before any token is released, so a
+        grounded answer streams verbatim while a rejected one streams the refusal
+        text instead. Streaming never bypasses the citation, numeric or
+        cross-document citation checks.
+        """
+
+        yield _sse({"type": "start"})
+        result = self.run(
+            query=query,
+            document_ids=document_ids,
+            top_k=top_k,
+            thread_id=thread_id,
+            user_id=user_id,
+        )
+        output = str(result.get("output", ""))
+        citations = result.get("citations", []) or []
+
+        if citations:
+            yield _sse({"type": "citations", "citations": citations})
+        for chunk in _stream_chunks(output):
+            yield _sse({"type": "delta", "text": chunk})
+        yield _sse(
+            {
+                "type": "end",
+                "grounded": bool(result.get("grounded", False)),
+                "task": result.get("task", ""),
+                "citations": citations,
+            }
+        )
+
+    def _build_state(
+        self,
+        query: str,
+        document_ids: list[str] | None,
+        top_k: int | None,
+        thread_id: str,
+        user_id: str,
+    ) -> AgentState:
         summary, history = self.memory.recent_history(
             user_id,
             thread_id,
             self.settings.short_term_turns,
         )
-        state: AgentState = {
+        return {
             "query": query,
             "document_ids": document_ids or [],
             "top_k": top_k or self.settings.top_k,
@@ -102,7 +155,14 @@ class HydroRAGAgent:
             "conversation_summary": summary,
             "long_term_memories": self.memory.list_long_term(user_id),
         }
-        result = self.graph.invoke(state)
+
+    def _persist_turn(
+        self,
+        user_id: str,
+        thread_id: str,
+        query: str,
+        result: dict[str, Any],
+    ) -> None:
         self.memory.append_turn(
             user_id,
             thread_id,
@@ -119,7 +179,6 @@ class HydroRAGAgent:
             )
         except Exception:
             pass
-        return result
 
     def _route(self, state: AgentState) -> dict[str, str]:
         task = heuristic_task(state["query"])
@@ -153,6 +212,9 @@ class HydroRAGAgent:
                 "我可以检索资料内容、总结关键信息、比较多份文档、提取表格，并进行基础计算。"
             ),
             "citations": [],
+            # Identity answers carry no retrieved evidence, so they are grounded
+            # by construction: nothing outside the system prompt is claimed.
+            "grounded": True,
         }
 
     def _retrieve(self, state: AgentState) -> dict[str, Any]:
@@ -411,15 +473,31 @@ class HydroRAGAgent:
     def _calculate(self, state: AgentState) -> dict[str, Any]:
         expression = _find_expression(state["query"])
         if not expression:
-            return {"output": "未识别出可计算的数字表达式。示例：计算 (12.5 - 3.2) / 2。"}
+            return {
+                "output": "未识别出可计算的数字表达式。示例：计算 (12.5 - 3.2) / 2。",
+                "citations": [],
+                "grounded": False,
+            }
         raw = self.calculate_tool.invoke({"expression": expression})
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            return {"output": raw, "tool_result": raw}
+            return {"output": raw, "tool_result": raw, "citations": [], "grounded": False}
         if data.get("ok"):
-            return {"output": f"计算结果：{data['expression']} = {data['value']}", "tool_result": raw}
-        return {"output": f"计算失败：{data.get('error', '未知错误')}", "tool_result": raw}
+            # Arithmetic is evaluated deterministically, so the result is exact
+            # rather than model-generated and needs no citation check.
+            return {
+                "output": f"计算结果：{data['expression']} = {data['value']}",
+                "citations": [],
+                "tool_result": raw,
+                "grounded": True,
+            }
+        return {
+            "output": f"计算失败：{data.get('error', '未知错误')}",
+            "citations": [],
+            "tool_result": raw,
+            "grounded": False,
+        }
 
     def _contextualize_query(self, state: AgentState) -> str:
         history = state.get("history", [])
@@ -479,6 +557,19 @@ class HydroRAGAgent:
 待压缩对话：
 {transcript}"""
         return message_text(self.model.invoke(prompt))
+
+
+def _sse(payload: dict[str, Any]) -> str:
+    """Format one Server-Sent-Event data frame."""
+
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _stream_chunks(text: str, size: int = 12) -> Iterable[str]:
+    """Split a verified answer into small pieces so the UI can type it out."""
+
+    for start in range(0, len(text), size):
+        yield text[start : start + size]
 
 
 def heuristic_task(query: str) -> str:

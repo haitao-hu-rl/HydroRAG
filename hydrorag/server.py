@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.runnables import RunnableLambda
 from langserve import add_routes
@@ -142,7 +142,31 @@ async def api_authentication(request, call_next):
 
 
 chat_runnable = RunnableLambda(invoke_agent).with_types(input_type=ChatInput)
-add_routes(app, chat_runnable, path="/api/chat", enabled_endpoints=["invoke", "batch", "stream"])
+# "stream" is deliberately excluded here: HydroRAG renders its own SSE endpoint
+# below, because the answer must be fully verified before the first token is
+# released. LangServe's generic stream endpoint would emit unverified text.
+add_routes(app, chat_runnable, path="/api/chat", enabled_endpoints=["invoke", "batch"])
+
+
+@app.post("/api/chat/stream")
+def chat_stream(body: ChatInput) -> StreamingResponse:
+    """Server-Sent-Event streaming for one query.
+
+    The answer is fully generated and verified before the first frame is sent,
+    so a rejected answer streams the refusal notice rather than unverified text.
+    """
+
+    return StreamingResponse(
+        agent.run_stream(
+            query=body.query,
+            document_ids=body.document_ids,
+            top_k=body.top_k,
+            thread_id=body.thread_id,
+            user_id=body.user_id,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/health")
