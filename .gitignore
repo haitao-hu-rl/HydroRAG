@@ -1,0 +1,95 @@
+# ============================================================
+# HydroRAG .gitignore
+# ============================================================
+
+# ---------- 密钥与环境变量 ----------
+# 真实密钥绝不入库；.env.example 作为模板保留
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+
+# ---------- Python 虚拟环境 ----------
+.venv/
+venv/
+env/
+ENV/
+virtualenv/
+
+# ---------- Python 缓存与编译产物 ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ---------- 构建与打包产物 ----------
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# ---------- 数据产物：向量库 / 模型 / 文档 / 运行时状态 ----------
+# 向量库与模型体积巨大，克隆后按 README 重建
+data/chroma/
+data/models/
+data/documents/*
+!data/documents/.gitkeep
+data/memory.sqlite3*
+data/jobs.sqlite3*
+data/logs/
+data/outputs/
+
+# 兜底：任何位置的 SQLite 数据库及其 WAL/SHM 边车文件
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+
+# 兜底：本地模型缓存与权重（含 HuggingFace 缓存布局）
+.cache/
+hf_cache/
+*.onnx
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+
+# ---------- OCR 语言包 ----------
+*.traineddata
+
+# ---------- 备份与临时产物 ----------
+backups/
+work/answer_eval_results.json
+*.bak
+*.tmp
+*.temp
+*.log
+
+# 调试用临时截图（如 work/ocr-smoke.png），非项目资源
+*smoke*.png
+
+# ---------- 编辑器与 IDE ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------- 操作系统垃圾文件 ----------
+.DS_Store
+._*
+Thumbs.db
+ehthumbs.db
+desktop.ini
