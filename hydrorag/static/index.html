@@ -296,6 +296,58 @@
     }
 
     /**
+     * Paced typewriter.
+     *
+     * The server verifies the whole answer and then emits every delta frame in
+     * a few milliseconds, so the browser receives them in one burst. Rendering
+     * that burst verbatim shows the answer instantly and defeats the purpose of
+     * streaming, so incoming text is queued here and released at a steady rate.
+     *
+     * A "catch-up" step keeps long answers from taking too long: the drain rate
+     * grows with the backlog, so the tail is never much slower than the head.
+     */
+    function createTypewriter(render) {
+      let queue = "";
+      let timer = null;
+      let done = false;
+      let onIdle = null;
+
+      const BASE_MS = 16;      // ~60 fps
+      const BASE_CHARS = 2;    // characters released per tick
+
+      function tick() {
+        if (!queue) {
+          timer = null;
+          if (done && onIdle) { const fn = onIdle; onIdle = null; fn(); }
+          return;
+        }
+        // Drain faster as the backlog grows so the answer never lags far behind.
+        const backlog = queue.length;
+        const take = Math.max(BASE_CHARS, Math.ceil(backlog / 24));
+        render(queue.slice(0, take));
+        queue = queue.slice(take);
+        timer = setTimeout(tick, BASE_MS);
+      }
+
+      function ensureRunning() {
+        if (timer === null && queue) timer = setTimeout(tick, BASE_MS);
+      }
+
+      return {
+        push(text) { queue += text; ensureRunning(); },
+        finish(callback) {
+          done = true;
+          if (!queue && !timer) callback();
+          else onIdle = callback;
+        },
+        flush() {
+          if (timer !== null) { clearTimeout(timer); timer = null; }
+          if (queue) { render(queue); queue = ""; }
+        },
+      };
+    }
+
+    /**
      * Ask the backend and render the answer as it streams.
      *
      * The server verifies the whole answer before releasing any token, so a
@@ -314,6 +366,11 @@
       const { bubble, body, caret } = createStreamingMessage();
       body.textContent = "正在检索资料证据并组织回答…";
       let received = false;
+
+      const typewriter = createTypewriter((piece) => {
+        caret.insertAdjacentText("beforebegin", piece);
+        keepScrolled();
+      });
 
       try {
         const response = await fetch("/api/chat/stream", {
@@ -366,8 +423,8 @@
                 body.textContent = "";
                 body.appendChild(caret);
               }
-              caret.insertAdjacentText("beforebegin", event.text || "");
-              keepScrolled();
+              // Queue instead of rendering: the whole answer may already be here.
+              typewriter.push(event.text || "");
             } else if (event.type === "end") {
               grounded = event.grounded;
               if (event.citations) {
@@ -378,8 +435,14 @@
           }
         }
 
-        caret.remove();
-        if (!received) body.textContent = "没有返回内容。";
+        if (!received) {
+          caret.remove();
+          body.textContent = "没有返回内容。";
+        } else {
+          // Wait for the queue to drain so the caret stays until typing finishes.
+          await new Promise((resolve) => typewriter.finish(resolve));
+          caret.remove();
+        }
         if (grounded === false) {
           const badge = document.createElement("div");
           badge.className = "guard-note";
@@ -387,6 +450,7 @@
           bubble.appendChild(badge);
         }
       } catch (error) {
+        typewriter.flush();
         caret.remove();
         body.textContent = `请求失败：${error.message || "请检查服务是否启动"}`;
       } finally {
