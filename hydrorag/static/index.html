@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HydroRAG</title>
+  <style>
+    :root {
+      --ink: #17212b;
+      --muted: #6c7784;
+      --line: #dfe5ea;
+      --soft: #f5f7f9;
+      --surface: #ffffff;
+      --navy: #14324a;
+      --blue: #2563eb;
+      --blue-soft: #e9f1ff;
+      --orange: #d97706;
+      --shadow: 0 18px 45px rgba(20, 50, 74, .08);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #eef2f5;
+      color: var(--ink);
+      font-family: Inter, "Microsoft YaHei", system-ui, sans-serif;
+    }
+    button, textarea, input { font: inherit; }
+    button { cursor: pointer; }
+    .app {
+      display: grid;
+      grid-template-columns: 292px minmax(0, 1fr);
+      height: 100vh;
+      overflow: hidden;
+    }
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      padding: 24px 18px;
+      background: var(--navy);
+      color: #f6f9fc;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 28px; }
+    .brand-mark {
+      display: grid; place-items: center; width: 38px; height: 38px;
+      border: 1px solid rgba(255,255,255,.25); border-radius: 10px;
+      background: #f2a93b; color: #17212b; font-weight: 800; font-size: 18px;
+    }
+    .brand strong { display: block; letter-spacing: .2px; font-size: 17px; }
+    .brand span { display: block; margin-top: 3px; color: #bdcbd7; font-size: 12px; }
+    .side-section { margin-bottom: 22px; }
+    .side-title {
+      display: flex; justify-content: space-between; align-items: center;
+      margin: 0 8px 10px; color: #a9bac7; font-size: 12px; letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .upload {
+      display: flex; align-items: center; justify-content: center; min-height: 86px;
+      padding: 12px; border: 1px dashed #6e8799; border-radius: 9px;
+      color: #e4edf4; background: rgba(255,255,255,.05); text-align: center;
+      transition: border-color .2s, background .2s;
+    }
+    .upload:hover, .upload.dragging { border-color: #f2a93b; background: rgba(242,169,59,.12); }
+    .upload input { display: none; }
+    .upload small { display: block; margin-top: 5px; color: #a9bac7; }
+    .document-list { display: grid; gap: 7px; max-height: 38vh; overflow: auto; padding-right: 3px; }
+    .document-empty { padding: 12px 8px; color: #a9bac7; font-size: 13px; line-height: 1.6; }
+    .document-item {
+      display: flex; gap: 9px; align-items: flex-start; padding: 9px 8px;
+      border-radius: 7px; color: #e7eef4; font-size: 13px; line-height: 1.4;
+    }
+    .document-item:hover { background: rgba(255,255,255,.08); }
+    .document-item input { margin-top: 3px; accent-color: #f2a93b; }
+    .document-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .document-meta { margin-top: 3px; color: #9eb1bf; font-size: 11px; }
+    .status {
+      margin-top: auto; padding: 12px 10px; border-top: 1px solid rgba(255,255,255,.13);
+      color: #c5d2dc; font-size: 12px; line-height: 1.6;
+    }
+    .status-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #f2a93b; }
+    .main { display: flex; min-width: 0; min-height: 0; overflow: hidden; flex-direction: column; background: var(--surface); }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between; min-height: 70px;
+      padding: 0 34px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.9);
+    }
+    .topbar h1 { margin: 0; font-size: 17px; font-weight: 650; }
+    .topbar p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .top-actions { display: flex; gap: 8px; }
+    .quiet-btn {
+      padding: 8px 11px; border: 1px solid var(--line); border-radius: 7px;
+      background: white; color: var(--muted); font-size: 12px;
+    }
+    .quiet-btn:hover { color: var(--ink); border-color: #aeb9c3; }
+    .chat {
+      flex: 1; min-height: 0; overflow-y: auto; padding: 42px max(24px, calc((100vw - 920px) / 2));
+    }
+    .welcome { max-width: 760px; margin: 2vh auto 45px; }
+    .welcome-kicker { color: var(--blue); font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .welcome h2 { max-width: 650px; margin: 12px 0 12px; color: var(--navy); font-size: clamp(28px, 4vw, 44px); line-height: 1.12; letter-spacing: -.02em; }
+    .welcome p { max-width: 650px; margin: 0; color: var(--muted); line-height: 1.7; }
+    .suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+    .suggestion { padding: 9px 12px; border: 1px solid var(--line); border-radius: 7px; background: white; color: #41515e; font-size: 12px; }
+    .suggestion:hover { border-color: #9bb7d4; color: var(--blue); }
+    .messages { display: grid; gap: 28px; max-width: 760px; margin: 0 auto; }
+    .message { display: flex; gap: 12px; align-items: flex-start; }
+    .message.user { justify-content: flex-end; }
+    .avatar { flex: 0 0 auto; display: grid; place-items: center; width: 29px; height: 29px; border-radius: 8px; background: var(--blue-soft); color: var(--blue); font-size: 11px; font-weight: 800; }
+    .user .avatar { order: 2; background: #fff1d9; color: var(--orange); }
+    .bubble { max-width: min(680px, 86%); padding: 13px 15px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 3px 12px rgba(20,50,74,.04); }
+    .user .bubble { border-color: #d6e3f9; background: #f4f8ff; }
+    .bubble-text { white-space: pre-wrap; line-height: 1.72; font-size: 14px; }
+    .citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .citation { padding: 5px 7px; border: 1px solid #d8e2ec; border-radius: 5px; color: #546575; background: #f8fafc; font-size: 11px; }
+    .composer-wrap { flex: 0 0 auto; padding: 14px max(24px, calc((100vw - 920px) / 2)) 22px; border-top: 1px solid var(--line); background: #fff; }
+    .composer { display: flex; gap: 9px; align-items: flex-end; max-width: 760px; margin: 0 auto; padding: 9px; border: 1px solid #cdd7df; border-radius: 11px; background: white; box-shadow: var(--shadow); }
+    textarea { flex: 1; min-height: 26px; max-height: 150px; padding: 7px 8px; resize: none; border: 0; outline: 0; color: var(--ink); line-height: 1.5; }
+    textarea::placeholder { color: #9aa7b2; }
+    .send { min-width: 70px; padding: 9px 12px; border: 0; border-radius: 7px; background: var(--navy); color: white; font-size: 13px; }
+    .send:hover { background: #244e6e; }
+    .send:disabled { cursor: wait; opacity: .55; }
+    .hint { max-width: 760px; margin: 8px auto 0; color: #9aa7b2; font-size: 11px; text-align: center; }
+    .loading { color: var(--muted); font-size: 13px; }
+    @media (max-width: 760px) {
+      .app { grid-template-columns: 1fr; height: auto; min-height: 100vh; overflow: visible; }
+      .sidebar { min-height: auto; padding: 16px; }
+      .brand { padding-bottom: 16px; }
+      .document-list { max-height: 160px; }
+      .status { margin-top: 14px; }
+      .main { min-height: 70vh; }
+      .topbar { padding: 0 18px; }
+      .topbar p { display: none; }
+      .chat { padding: 30px 16px; }
+      .welcome { margin: 0 auto 32px; }
+      .welcome h2 { font-size: 32px; }
+      .composer-wrap { padding: 12px 14px 17px; }
+      .bubble { max-width: 88%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">H</div>
+        <div><strong>HydroRAG</strong><span>Enterprise engineering knowledge</span></div>
+      </div>
+
+      <section class="side-section">
+        <div class="side-title"><span>资料库</span><span id="chunk-count">0 chunks</span></div>
+        <label class="upload" id="upload-zone">
+          <input id="file-input" type="file" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.docx,.xlsx,.csv" />
+          <span>上传工程资料<small>支持 PDF、图片、Word、Excel 和 CSV</small></span>
+        </label>
+      </section>
+
+      <section class="side-section">
+        <div class="side-title"><span>检索范围</span><span>可多选</span></div>
+        <div class="document-list" id="document-list"><div class="document-empty">还没有资料。上传文件后，从这里选择检索范围。</div></div>
+      </section>
+
+      <div class="status"><span class="status-dot" id="status-dot"></span><span id="status-text">正在连接本地服务</span></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><h1>企业工程资料问答智能体</h1><p>基于 LangGraph 路由、RAG 检索和 DeepSeek 生成</p></div>
+        <div class="top-actions"><button class="quiet-btn" id="refresh-btn" type="button">刷新资料库</button><button class="quiet-btn" id="clear-btn" type="button">清空对话</button></div>
+      </header>
+
+      <section class="chat" id="chat">
+        <div class="welcome" id="welcome">
+          <div class="welcome-kicker">HydroRAG / Local</div>
+          <h2>把工程资料交给一个会检索和核对来源的问答智能体。</h2>
+          <p>你可以检索规范、总结报告、比较多份资料、提取表格，或要求它回溯原文位置。</p>
+          <div class="suggestions">
+            <button class="suggestion" type="button">总结这份资料的主要结论</button>
+            <button class="suggestion" type="button">梳理工程方法、数据与验证结果</button>
+            <button class="suggestion" type="button">提取资料中的结果表格</button>
+          </div>
+        </div>
+        <div class="messages" id="messages"></div>
+      </section>
+
+      <div class="composer-wrap">
+        <form class="composer" id="composer">
+          <textarea id="query" rows="1" placeholder="询问资料内容，例如：这份报告的核心结论是什么？" required></textarea>
+          <button class="send" id="send-btn" type="submit">发送</button>
+        </form>
+        <div class="hint">回答基于当前选中的资料；未选择时检索全部已入库资料。可用“请记住……”保存长期偏好。</div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const messages = $("#messages");
+    const welcome = $("#welcome");
+    const query = $("#query");
+    const sendButton = $("#send-btn");
+    let documents = [];
+    const userId = localStorage.getItem("hydrorag-user-id") || crypto.randomUUID();
+    localStorage.setItem("hydrorag-user-id", userId);
+    let threadId = sessionStorage.getItem("hydrorag-thread-id") || crypto.randomUUID();
+    sessionStorage.setItem("hydrorag-thread-id", threadId);
+
+    function setStatus(text, ready = true) {
+      $("#status-text").textContent = text;
+      $("#status-dot").style.background = ready ? "#f2a93b" : "#e05d44";
+    }
+
+    function addMessage(role, text, citations = []) {
+      welcome.style.display = "none";
+      const item = document.createElement("div");
+      item.className = `message ${role}`;
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = role === "user" ? "你" : "H";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      const body = document.createElement("div");
+      body.className = "bubble-text";
+      body.textContent = text;
+      bubble.appendChild(body);
+      if (citations.length && role !== "user") {
+        const source = document.createElement("div");
+        source.className = "citations";
+        citations.forEach((citation) => {
+          const tag = document.createElement("span");
+          tag.className = "citation";
+          const location = citation.location || (citation.page ? `p.${citation.page}` : "位置未知");
+          tag.textContent = `${citation.evidence_id || "证据"} · ${citation.title || "未命名资料"} · ${location}`;
+          source.appendChild(tag);
+        });
+        bubble.appendChild(source);
+      }
+      item.append(role === "user" ? bubble : avatar, role === "user" ? avatar : bubble);
+      messages.appendChild(item);
+      $("#chat").scrollTop = $("#chat").scrollHeight;
+      return item;
+    }
+
+    function selectedDocumentIds() {
+      return [...document.querySelectorAll("#document-list input:checked")].map((input) => input.value);
+    }
+
+    function renderDocuments() {
+      const list = $("#document-list");
+      list.replaceChildren();
+      $("#chunk-count").textContent = `${window.chunkCount || 0} chunks`;
+      if (!documents.length) {
+        list.innerHTML = '<div class="document-empty">还没有资料。上传文件后，从这里选择检索范围。</div>';
+        return;
+      }
+      documents.forEach((item) => {
+        const label = document.createElement("label");
+        label.className = "document-item";
+        label.innerHTML = `<input type="checkbox" value="${item.document_id}"><span><span class="document-name" title="${item.title}">${item.title}</span><span class="document-meta">${item.document_id}</span></span>`;
+        list.appendChild(label);
+      });
+    }
+
+    async function refreshDocuments() {
+      try {
+        const response = await fetch("/api/documents");
+        const data = await response.json();
+        documents = data.documents || [];
+        window.chunkCount = data.chunks || 0;
+        renderDocuments();
+        setStatus("本地服务已连接");
+      } catch (error) {
+        setStatus("无法连接本地服务", false);
+      }
+    }
+
+    async function uploadDocument(file) {
+      if (!file) return;
+      setStatus(`正在排队 ${file.name}`);
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        const response = await fetch("/api/documents", { method: "POST", body: form });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "上传失败");
+        setStatus(`后台解析中 ${file.name}`);
+        await waitForIndexJob(data.job_id, file.name);
+      } catch (error) {
+        setStatus(error.message || "索引失败", false);
+      }
+    }
+
+    async function waitForIndexJob(jobId, fileName) {
+      for (let attempt = 0; attempt < 600; attempt += 1) {
+        const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "索引任务查询失败");
+        const job = data.job || {};
+        if (job.status === "succeeded") {
+          await refreshDocuments();
+          setStatus(`已索引 ${fileName}`);
+          return;
+        }
+        if (job.status === "failed") throw new Error(`索引失败：${job.error || "未知错误"}`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      throw new Error("索引任务超时，请稍后查看任务状态");
+    }
+
+    async function ask(text) {
+      const value = (text || query.value).trim();
+      if (!value || sendButton.disabled) return;
+      query.value = "";
+      query.style.height = "auto";
+      addMessage("user", value);
+      sendButton.disabled = true;
+      sendButton.textContent = "检索中";
+      const loading = addMessage("assistant", "正在检索资料证据并组织回答…");
+      try {
+        const response = await fetch("/api/chat/invoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input: { query: value, document_ids: selectedDocumentIds(), thread_id: threadId, user_id: userId } })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "服务请求失败");
+        const result = data.output || data;
+        loading.remove();
+        addMessage("assistant", result.output || "没有返回内容。", result.citations || []);
+      } catch (error) {
+        loading.remove();
+        addMessage("assistant", `请求失败：${error.message || "请检查服务是否启动"}`);
+      } finally {
+        sendButton.disabled = false;
+        sendButton.textContent = "发送";
+        query.focus();
+      }
+    }
+
+    $("#composer").addEventListener("submit", (event) => { event.preventDefault(); ask(); });
+    $("#query").addEventListener("input", () => { query.style.height = "auto"; query.style.height = `${Math.min(query.scrollHeight, 150)}px`; });
+    $("#query").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); ask(); } });
+    $("#refresh-btn").addEventListener("click", refreshDocuments);
+    $("#clear-btn").addEventListener("click", async () => {
+      await fetch(`/api/conversations/${encodeURIComponent(threadId)}?user_id=${encodeURIComponent(userId)}`, { method: "DELETE" }).catch(() => {});
+      threadId = crypto.randomUUID();
+      sessionStorage.setItem("hydrorag-thread-id", threadId);
+      messages.replaceChildren();
+      welcome.style.display = "block";
+    });
+    $("#file-input").addEventListener("change", (event) => uploadDocument(event.target.files[0]));
+    ["dragenter", "dragover"].forEach((eventName) => $("#upload-zone").addEventListener(eventName, (event) => { event.preventDefault(); $("#upload-zone").classList.add("dragging"); }));
+    ["dragleave", "drop"].forEach((eventName) => $("#upload-zone").addEventListener(eventName, (event) => { event.preventDefault(); $("#upload-zone").classList.remove("dragging"); }));
+    $("#upload-zone").addEventListener("drop", (event) => uploadDocument(event.dataTransfer.files[0]));
+    document.querySelectorAll(".suggestion").forEach((button) => button.addEventListener("click", () => { query.value = button.textContent; query.focus(); }));
+    refreshDocuments();
+  </script>
+</body>
+</html>
